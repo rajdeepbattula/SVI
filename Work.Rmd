@@ -1,0 +1,260 @@
+---
+title: "Untitled"
+output: html_document
+date: '2022-06-29'
+---
+
+```{r}
+ReqPkgs <- c('knitr','sp','sf','spdep','tidycensus','dplyr','tidyr','mapview','RColorBrewer','leaflet','leafpop','ggplot2')
+ReqPkgs <- as.list(ReqPkgs)
+#suppressMessages(lapply(ReqPkgs, install.packages, character.only = TRUE))
+suppressMessages(lapply(ReqPkgs, require, character.only = TRUE))
+
+#census_api_key("b555fa4a25e085541cc7aa31101f81bc34c4b5d1")
+#install = TRUE
+tidycensus::census_api_key(key = 'b555fa4a25e085541cc7aa31101f81bc34c4b5d1', install = TRUE, overwrite = TRUE)
+readRenviron("~/.Renviron")
+
+Counties <- tigris::list_counties(state = 'Indiana')
+Counties <- Counties$county
+print(Counties)
+
+#Blockgroup Level Variables
+varsBG <- c('B25003_001','B25003_003','B25070_007','B25070_008','B25070_009','B25070_010','B25071_001','B11007_001','B11007_003','B25034_001','B25034_008','B25034_009','B25034_010','B25034_011','B01003_001','B19301_001','B25033_001','B25033_006','B25033_007','B25033_012','B25033_013','B25044_001','B25044_003','B25044_010','B23025_003','B23025_005','B25014_001','B25014_005','B25014_006','B25014_007','B25014_011','B25014_012','B25014_013','B25024_001','B25024_007','B25024_008','B25024_009','B09021_022','B09021_001','B01001_020','B01001_021','B01001_022','B01001_023','B01001_024','B01001_025','B01001_044','B01001_045','B01001_046','B01001_047','B01001_048','B01001_049','B99163_001','B99163_005','B01001_003','B01001_004','B01001_005','B01001_006','B01001_027','B01001_028','B01001_029','B01001_030','B03002_003','B02001_004','B02001_001','B02001_003','B03003_003','B02001_006','B02001_007','B02001_008','B03002_003','B03002_001','B02001_001','B25002_001','B25002_003','B15003_001','B15003_016','B15003_017','B15003_018','B15003_019','B15003_020','B15003_021','B15003_022','B15003_023','B15003_024','B15003_025','B02001_005','B03003_001','B25070_001','B17020_001','C17002_001','C17002_002','C17002_003','C17002_004')
+
+#Tract Level Variables
+varsCT <- c('B18101_025','B18101_026','B18101_006','B18101_007','C18130_009','C18130_010','C18130_016','C18130_017','B26001_001','B11004_012','B11004_018','B09008_001','B09008_010','B09008_011','B09008_012','B17023_001','B17023_016','B17023_017','B17023_018','B22002_001')
+
+CBG18_1 <- tidycensus::get_acs(
+  
+  #get_decentennial() pulls in data from the decentennial census 1990-2010
+  
+  geography = 'block group', #other options include us, region, division, state, county subdivision, census tract, block, place, alaska native regional corporation, american indian area/alaska native area/hawaiian home land, american indian area/alaska native area (reservation or statistical entity only), american indian area (off-reservation trust land only)/hawaiian home land, metropolitan statistical area/micropolitan statistical area, combined statistical area, new england city and town area, combined new england city and town area, urban area, congressional district, school district (elementary, secondary or unified), public use microdata area, zip code tabulation area, and state legislative district (upper or lower chamber).
+  
+  state = 'IN',
+  
+  county = Counties, #The county list created in the previous step
+  
+  survey = 'acs5', #could include the ACS 1, 3 or 5 year surveys
+  
+  year = 2018, #2009 through 2021 are available. Defaults to 2021
+  
+  variables = varsBG, #The variable list created in the previous step, use tidycensus::load_variables to see what variables are available for the survey and or geography, there may be alternatives or others you want to add!
+  
+  geometry = FALSE, #if TRUE, uses the tigris package to return an sf tibble with simple feature geometry in the 'geometry' column. We use Tigris later to pull the geometry in.
+  
+  output = 'wide',
+  
+  show_call = FALSE
+  
+)
+
+#Separate Place Names#
+
+CBG18_1 <- tidyr::separate(data = CBG18_1, col = "NAME", into = c("BLOCK_GROUP","CENSUS_TRACT","COUNTY","STATE"), sep = ",", remove = FALSE)
+
+CBG18_1$TRACT_GEOID <- substring(CBG18_1$GEOID, 1, 11)
+
+print(dim(CBG18_1)) #The dimensions should match this for Indiana: 2,634 x 187
+
+CT18B <- tidycensus::get_acs(
+  
+  geography = 'Tract',
+  
+  state = 'IN',
+  
+  county = Counties,
+  
+  #c('Columbia','Clatsop','Umatilla','Wallowa','Morrow','Union','Gilliam','Tillamook','Washington','Sherman','Multnomah','Hood River','Wasco','Clackamas','Yamhill','Marion','Baker','Polk','Wheeler','Lincoln','Grant','Jefferson','Linn','Benton','Crook','Malheur','Deschutes','Lane','Harney','Douglas','Lake','Klamath','Coos','Jackson','Curry','Josephine'), # This can include multiple counties
+  
+  survey = 'acs5',
+  
+  year = 2018,
+  
+  variables = varsCT,
+  
+  geometry = FALSE,
+  
+  output = 'wide',
+  
+  show_call = FALSE
+  
+)
+
+#Separate Place Names#
+
+CT18B <- tidyr::separate(data = CT18B, col = "NAME", into = c("CENSUS_TRACT","COUNTY","STATE"), sep = ",")
+
+CT18B$TRACT_GEOID <- CT18B$GEOID
+
+print(dim(CT18B))
+
+#The dimensions should match this for Indiana: 834 x 45
+
+JndTbls <- dplyr::left_join(x = CBG18_1, y = CT18B, by = "TRACT_GEOID")
+
+dim(JndTbls) #get dimensions
+
+#The dimensions should match this for Indiana: 2,634 x 231
+
+#SOCIOECONOMIC STATUS:
+
+JndTbls$TOTPOP <- JndTbls$B01003_001E #TOTAL_POPULATION - 
+JndTbls$POV <- (JndTbls$C17002_002E+JndTbls$C17002_003E)/JndTbls$C17002_001E #PER_POVERTY
+JndTbls$UNEMP <- JndTbls$B23025_005E/JndTbls$B23025_003E #PER_UNEMPLOYED 
+JndTbls$PCI <- JndTbls$B19301_001E #PER_CAPITA_INCOME
+
+#LANGUAGE AND EDUCATION:
+
+JndTbls$NOHSDP <- 1-((JndTbls$B15003_016E+JndTbls$B15003_017E+JndTbls$B15003_018E+JndTbls$B15003_019E+JndTbls$B15003_020E+JndTbls$B15003_021E+JndTbls$B15003_022E+JndTbls$B15003_023E+JndTbls$B15003_024E+JndTbls$B15003_025E)/JndTbls$B15003_001E) #PER_LESS_HS_GRAD
+JndTbls$LIMENG <-  JndTbls$B99163_005E/JndTbls$B99163_001E #PER_POOR_ENGLISH
+
+#DEMOGRAPHICS:
+
+JndTbls$AGE65 <- JndTbls$B09021_022E/JndTbls$B09021_001E #PER_OVER_65 
+JndTbls$AGE17 <- (JndTbls$B01001_003E+JndTbls$B01001_004E+JndTbls$B01001_005E+JndTbls$B01001_006E+JndTbls$B01001_027E+JndTbls$B01001_028E+JndTbls$B01001_029E+JndTbls$B01001_030E)/JndTbls$B01003_001E #PER_UNDER_17 
+JndTbls$DISABL <- (JndTbls$B18101_026E+JndTbls$B18101_007E+JndTbls$C18130_010E+JndTbls$C18130_017E)/(JndTbls$B18101_025E+JndTbls$B18101_006E+JndTbls$C18130_009E+JndTbls$C18130_016E) #PER_DISABLED
+JndTbls$SNGPNT <- (JndTbls$B09008_010E+JndTbls$B09008_011E+JndTbls$B09008_012E)/JndTbls$B09008_001E #PER_SINGL_PRNT
+
+#HOUSING AND TRANSPORTATION:
+
+JndTbls$MUNIT <- (JndTbls$B25024_007E+JndTbls$B25024_008E+JndTbls$B25024_009E)/JndTbls$B25024_001E #PER_MULTI_DWELL
+JndTbls$MOBILE <- (JndTbls$B25033_006E+JndTbls$B25033_007E+JndTbls$B25033_012E+JndTbls$B25033_013E)/JndTbls$B25033_001E #PER_MOBILE_DWEL
+JndTbls$CROWD <- (JndTbls$B25014_005E+JndTbls$B25014_006E+JndTbls$B25014_007E+JndTbls$B25014_011E+JndTbls$B25014_012E+JndTbls$B25014_013E)/JndTbls$B25014_001E #PER_CROWD_DWELL
+JndTbls$NOVEH <- (JndTbls$B25044_003E+JndTbls$B25044_010E)/JndTbls$B25044_001E #PER_NO_VEH_AVAIL
+JndTbls$GROUPQ <- JndTbls$B26001_001E/JndTbls$B01003_001E #PER_GROUP_DWELL
+
+#RACIAL AND ETHNIC MAKEUP:
+
+JndTbls$MINORITY <- 1-(JndTbls$B03002_003E/JndTbls$B03002_001E)
+JndTbls$NTVAMRCN <- JndTbls$B02001_004E/JndTbls$B02001_001E
+JndTbls$ASIAN <- JndTbls$B02001_005E/JndTbls$B02001_001E
+JndTbls$BLACK <- JndTbls$B02001_003E/JndTbls$B02001_001E
+JndTbls$HISPLATX <- JndTbls$B03003_003E/JndTbls$B03003_001E
+JndTbls$PACISL <- JndTbls$B02001_006E/JndTbls$B02001_001E
+JndTbls$OTHRRACE <- JndTbls$B02001_007E/JndTbls$B02001_001E
+JndTbls$MULTRACE <- JndTbls$B02001_008E/JndTbls$B02001_001E
+JndTbls$WHITE <- JndTbls$B03002_003E/JndTbls$B03002_001E
+
+#OPTIONAL VARIABLES:
+
+JndTbls$HOMESOCCPD <- 1-JndTbls$B25002_003E/JndTbls$B25002_001E
+JndTbls$RENTER <- JndTbls$B25003_003E/JndTbls$B25003_001E
+JndTbls$RENTBURDEN <- (JndTbls$B25070_007E+JndTbls$B25070_008E+JndTbls$B25070_009E+JndTbls$B25070_010E)/JndTbls$B25070_001E
+JndTbls$RENTASPERINCOME <- (JndTbls$B25071_001E/100)
+JndTbls$OVR65ALONE <- JndTbls$B11007_003E/JndTbls$B11007_001E
+JndTbls$BLTBFR1969 <- (JndTbls$B25034_008E+JndTbls$B25034_009E+JndTbls$B25034_010E+JndTbls$B25034_011E)/JndTbls$B25034_001E
+JndTbls$SVRPOV <- JndTbls$C17002_002E/JndTbls$C17002_001E
+JndTbls$MODPOV <- JndTbls$C17002_004E/JndTbls$C17002_001E
+JndTbls$SINGLMTHRPVRTY <-(JndTbls$B17023_016E+JndTbls$B17023_017E+JndTbls$B17023_018E)/JndTbls$B17023_001E
+
+#RANKING#
+
+#These functions rank each of the variables, variables with matching values across ranks are given the max score, this is the default in excel where the original formulae were derived
+
+a <- JndTbls$RNKPOV <- rank(x = -JndTbls$POV, na.last = "keep", ties.method = "max")
+b <- JndTbls$RNKUNEMP <- rank(x = -JndTbls$UNEMP, na.last = "keep", ties.method = "max")
+c <- JndTbls$RNKPCI <- rank(x = JndTbls$PCI, na.last = "keep", ties.method = "max") #Note that we are not taking the inverse here because the higher the Per Capita Income, the greater the Adaptive Capacity of a given blockgroup
+d <- JndTbls$RNKNOHSDP <- rank(x = -JndTbls$NOHSDP, na.last = "keep", ties.method = "max")
+e <- JndTbls$RNKLIMENG <- rank(x = -JndTbls$LIMENG, na.last = "keep", ties.method = "max")
+f <- JndTbls$RNKAGE65 <- rank(x = -JndTbls$AGE65, na.last = "keep", ties.method = "max")
+g <- JndTbls$RNKAGE17 <- rank(x = -JndTbls$AGE17, na.last = "keep", ties.method = "max")
+h <- JndTbls$RNKDISABL <- rank(x = -JndTbls$DISABL, na.last = "keep", ties.method = "max")
+i <- JndTbls$RNKSNGPNT <- rank(x = -JndTbls$SNGPNT, na.last = "keep", ties.method = "max")
+j <- JndTbls$RNKMUNIT <- rank(x = -JndTbls$MUNIT, na.last = "keep", ties.method = "max")
+k <- JndTbls$RNKMOBILE <- rank(x = -JndTbls$MOBILE, na.last = "keep", ties.method = "max")
+l <- JndTbls$RNKCROWD <- rank(x = -JndTbls$CROWD, na.last = "keep", ties.method = "max")
+m <- JndTbls$RNKNOVEH <- rank(x = -JndTbls$NOVEH, na.last = "keep", ties.method = "max")
+n <- JndTbls$RNKGROUPQ <- rank(x = -JndTbls$GROUPQ, na.last = "keep", ties.method = "max")
+
+#Sum The Ranks
+
+JndTbls$SUMRANK = a+b+c+d+e+f+g+h+i+j+k+l+m+n
+
+#Derive the Adaptive Capacity Index
+
+JndTbls$ADPTVCAPACITY <- dplyr::percent_rank(JndTbls$SUMRANK)
+
+# This Determines the Percentage Contribution to Final Rank
+JndTbls$GEOID <- JndTbls$GEOID.x #Geoid.s was created in the previous join and needs to be renamed before joining it to the geometry
+geoid <- which(colnames(JndTbls)=="GEOID")
+a <- which(colnames(JndTbls)=="RNKPOV")
+z <- which(colnames(JndTbls)=="RNKGROUPQ")
+cols <- as.vector(names(JndTbls[a:z]))
+Func <- function(x){round((abs(x)/abs(JndTbls$SUMRANK)),2)*100}
+RnkPerc <- dplyr::mutate_at(.tbl = JndTbls, .vars = cols, .funs = Func)
+RnkPerc <- RnkPerc[c(geoid, a:z)]
+JndTbls <- dplyr::right_join(JndTbls, RnkPerc, by = "GEOID")
+
+JndTbls$GEOID <- JndTbls$GEOID.x #Geoid.x was created in the previous join and needs to be renamed before joining it to the geometry
+options(tigris_use_cache = TRUE)
+blockgroup_Geom <- tigris::block_groups(state = 'IN', county = Counties, cb = TRUE) #we are using simplified geometry here, this can be changed by setting cb = FALSE, but takes a little bit longer to download
+JndTblsSP <- sp::merge(x = blockgroup_Geom, JndTbls, by = 'GEOID') #Now we're using the GEOID to join the Census Data to the Geometry
+
+suppressPackageStartupMessages(require(leaflet))
+suppressPackageStartupMessages(require(dplyr))
+suppressPackageStartupMessages(require(leaflet.esri))
+
+pop <- paste0(
+  "<h3>","<b>", JndTblsSP$COUNTY.x,"</b>","</h3>",
+  "<b>", JndTblsSP$CENSUS_TRACT.x, "</b>","<br>",
+  "<b>","TOTAL POPULATION: ", prettyNum(JndTblsSP$TOTPOP, big.mark=","), " +/- ",JndTblsSP$B01003_001M,"</b>","<br>",
+  "<b>","ADAPTIVE CAPACITY: ", round(100*(JndTblsSP$ADPTVCAPACITY), 1),"%","</b>","<br>",
+  
+  "<b><h4>SOCIOECONOMIC STATUS:<b></h4>",
+  
+  "<b>PCT LIVING IN POVERTY: </b>", round(100*(JndTblsSP$POV), 1), "%","<br>",
+  "<b>PCT 16+ UNEMPLOYED: </b>", round(100*(JndTblsSP$UNEMP), 1), "%","<br>",
+  "<b>PER CAPITA INCOME: </b>", "$", prettyNum(JndTblsSP$PCI, big.mark=","),"<br>",
+  
+  "<b><h4>LANGUAGE AND EDUCATION:<b></h4>",
+  
+  "<b>PCT OF POP 25+ LESS THAN 12th GRADE: </b>", round(100*(JndTblsSP$NOHSDP),1), "%","<br>",
+  "<b>PCT NO ENGLISH: </b>", round(100*(JndTblsSP$LIMENG),1), "%","<br>",
+  
+  "<b><h4>DEMOGRAPHICS:</h4><b>",
+  
+  "<b>PCT UNDER AGE OF 17: </b>", round(100*(JndTblsSP$AGE17),1), "%","<br>",
+  "<b>PCT 65+: </b>", round(100*(JndTblsSP$AGE65),1), "%","<br>",
+  "<b>PCT DISABLED: </b>", round(100*(JndTblsSP$DISABL),1), "%","<br>",
+  "<b>PCT CHLDRN LVNG IN SNGL PARENT HSHLDS: </b>", round(100*(JndTblsSP$SNGPNT),1), "%","<br>",
+  
+  "<b><h4>HOUSING AND TRANSPORTATION:</h4><b>",
+  
+  "<b>PCT LIVING IN MULTI-UNIT STRUCTURE: </b>", round(100*(JndTblsSP$MUNIT),1), "%","<br>",
+  "<b>PCT MOBILE DWELLING: </b>", round(100*(JndTblsSP$MOBILE),1), "%","<br>",
+  "<b>PCT LIVING IN CROWDED DWELLING: </b>", round(100*(JndTblsSP$CROWD),1), "%","<br>",
+  "<b>PCT WITH NO VEHICLE ACCESS: </b>", round(100*(JndTblsSP$NOVEH),1), "%","<br>",
+  "<b>PCT LIVING IN GROUP QUARTERS: </b>", round(100*(JndTblsSP$GROUPQ),1), "%","<br>",
+  
+  "<b><h4>RACIAL AND ETHNIC MAKEUP:<b></h4>",
+  "<b>PCT MINORITY: </b>", round(100*(JndTblsSP$MINORITY),1), "%"
+) #Here we're creating a popup for our interactive map, include whatever variables you want here!
+
+BRBG <- RColorBrewer::brewer.pal(n = 11, name = "BrBG")
+
+pal <- leaflet::colorQuantile(
+  palette = BRBG,
+  domain = JndTblsSP$ADPTVCAPACITY, n = 11, reverse = FALSE
+) #Creating a Color Pallete, Feel free to choose whatever one you want, see the package Viridis for some cool options
+
+myMap <- leaflet(data = JndTblsSP) %>% addTiles() %>% addPolygons(
+    color = "#444444", 
+    weight = 1, 
+    smoothFactor = 0.5,
+    opacity = 0.5, 
+    fillOpacity = 0.5,
+    fillColor = ~pal(ADPTVCAPACITY),
+    highlightOptions = highlightOptions(color = "white", weight = 2, bringToFront = TRUE), 
+    popup = pop, popupOptions = popupOptions(maxHeight = 250, maxWidth = 250, )) %>% addLegend("bottomright", 
+    pal = pal, 
+    values = JndTblsSP$ADPTVCAPACITY,
+    title = "Adaptive Capacity Score",
+    labFormat = labelFormat(prefix = ""),
+    opacity = 0.75) 
+
+myMap
+
+write_csv(x = JndTbls, paste0("P://1004/Development/DATA/Profiles/SoAR/TextFiles/Demo_HousingCostBurdened_",2018,".txt"))
+```
+

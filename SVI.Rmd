@@ -1,0 +1,142 @@
+---
+title: "ACI/SVI"
+output: html_document
+date: '2022-06-07'
+---
+```{r}
+install.packages("tidyverse")
+install.packages("tidycensus")
+
+library(tidyverse)
+library(tidycensus)
+library(janitor)
+library(lubridate)
+library(dplyr)
+
+#You need a Census API key. Request one here:
+#https://api.census.gov/data/key_signup.html
+
+census_api_key("b555fa4a25e085541cc7aa31101f81bc34c4b5d1")
+install = TRUE
+
+
+```
+
+```{r}
+TRCT <- get_acs(geography='tract',
+                variables=c(RENTEROCC65UP="B25072_023",RNT3035="B25072_027",RNT35UP="B25072_028",
+                            OWNEROCC65UP="B25093_023",OWN3035="B25093_027",OWN35UP="B25093_028"),
+                state="IN",
+                survey="acs5",
+                year=2018,
+                output="tidy")%>%  ##'wide' setting creates columns of the variables (horizontal).  'tidy' (default) is vertical table.
+  mutate(GEOTYPE="TR10")
+
+
+
+CNTY <- get_acs(geography='county',
+           variables=c(RENTEROCC65UP="B25072_023",RNT3035="B25072_027",RNT35UP="B25072_028",
+                       OWNEROCC65UP="B25093_023",OWN3035="B25093_027",OWN35UP="B25093_028"),
+                      state="IN",
+                      survey="acs5",
+                      year=2018,
+                      output="tidy")%>%  ##'wide' setting creates columns of the variables (horizontal).  'tidy' (default) is vertical table.
+          mutate(GEOTYPE="CNTY")
+
+
+
+INST <- get_acs(geography='state',
+           variables=c(RENTEROCC65UP="B25072_023",RNT3035="B25072_027",RNT35UP="B25072_028",
+                       OWNEROCC65UP="B25093_023",OWN3035="B25093_027",OWN35UP="B25093_028"),
+                     state="IN",
+                     survey="acs5",
+                     year=2018,
+                     output="tidy")%>%
+          mutate(GEOTYPE="INST")
+
+
+
+
+####### Sum the 11 counties to get MSA data #################
+
+MSA <- subset(CNTY,GEOID %in% c("18011","18013","18057","18059","18063","18081","18095",
+                                "18097","18109","18133","18145"))%>%
+  group_by(variable)%>%
+  summarize_at(vars(estimate),list(estimate=sum))%>%
+  mutate(GEOID="26900")%>%
+  mutate(GEOTYPE="MS13")%>%
+  mutate(NAME="MSA")
+
+
+
+
+
+
+
+######## Some calculations ###################
+
+ComboTable <- bind_rows(TRCT,CNTY,INST,MSA)   ##combines the four tables into one
+
+
+
+DenomTable <- subset(ComboTable,variable %in% c("RENTEROCC65UP","OWNEROCC65UP"))
+
+
+
+CalcTable_Renter30Up<- subset(ComboTable,variable %in% c("RNT3035","RNT35UP"))%>%
+  group_by(GEOID,GEOTYPE)%>%
+  summarize_at(vars(estimate), list(estimate=sum))%>%
+  mutate(variable="RENTEROCC65UPCOSTS30")
+
+
+
+CalcTable_Owner30Up<- subset(ComboTable,variable %in% c("OWN3035","OWN35UP"))%>%
+  group_by(GEOID,GEOTYPE)%>%
+  summarize_at(vars(estimate), list(estimate=sum))%>%
+  mutate(variable="OWNEROCC65UPCOSTS30")
+
+
+
+CalcTable_TotalDenom<- DenomTable%>%
+  group_by(GEOID,GEOTYPE)%>%
+  summarize_at(vars(estimate), list(estimate=sum))%>%
+  mutate(variable="TOTOCC65UP")
+
+
+
+CalcTable_Total30Up<- subset(ComboTable,variable %in% c("RNT3035","RNT35UP","OWN3035","OWN35UP"))%>%
+  group_by(GEOID,GEOTYPE)%>%
+  summarize_at(vars(estimate), list(estimate=sum))%>%
+  mutate(variable="TOTOCC65UPCOSTS30")
+
+
+
+
+
+
+#### exporting #######
+
+
+Export <- bind_rows(DenomTable,CalcTable_Renter30Up,CalcTable_Owner30Up,CalcTable_TotalDenom,CalcTable_Total30Up)  
+              ##combines the tables into one
+
+
+Export <-Export%>%
+  mutate(DATAYEAR=2018)%>%
+  mutate(moe="")%>%
+  select(DATAYEAR,
+         GEOTYPE,
+         GEOID,
+         variable,
+         estimate,
+         moe)%>%
+  write.table(.,
+              file=paste("P://1004/Development/DATA/Profiles/SoAR/TextFiles/HousingCostBurdened_",2018,".txt"),
+              quote=FALSE,
+              sep=",",
+              eol=",\n",
+              na="",
+              row.names=FALSE,
+              col.names=FALSE)
+```
+
